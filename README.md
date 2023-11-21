@@ -2,7 +2,10 @@
 Library to parse go/shell script from md files
 
 How ro run:
-1. Clone the repo: https://github.com/Rohit-PX/md-file-code-gen/
+1. Clone the repo:
+   ```
+       git clone https://github.com/Rohit-PX/md-file-code-gen/
+   ```
 2. Build the binary:
    ```
        go build -o validatedoc
