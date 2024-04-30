@@ -16,6 +16,9 @@ import (
 var ArtifactDirectory string = "artifacts"
 var YamlFileName string = ArtifactDirectory + "/docTest.yaml"
 var KubectlCmdFileName string = ArtifactDirectory + "/kubectlCmd.sh"
+var kubectlCmd string = "kubectl"
+var pxctlCmd string = "pxctl"
+var cmdType string
 
 func main() {
 
@@ -23,6 +26,7 @@ func main() {
 	var mdFilePath, kubeconfigFilePath string
 	flag.StringVar(&mdFilePath, "mdfile", "", `Path to the md file`)
 	flag.StringVar(&kubeconfigFilePath, "kubeconfig", "", `Path to the kubeconfig file`)
+	flag.StringVar(&cmdType, "commandType", "", `Command type could be one of - kubectl or pxctl (pxctl needs to be run on the PX node directly)`)
 	flag.Parse()
 	if mdFilePath == "" {
 		log.Fatalln("Please, provide path to an mdfile for the readme to parse.")
@@ -35,14 +39,14 @@ func main() {
 	md := markdown.New(markdown.XHTMLOutput(true), markdown.Nofollow(true))
 	tokens := md.Parse(body)
 
-	yamlFile, kubectlCmdFile, err := markdownutils.CreateArtifactFiles(ArtifactDirectory, YamlFileName, KubectlCmdFileName)
+	yamlFile, DocCmdFile, err := markdownutils.CreateArtifactFiles(ArtifactDirectory, YamlFileName, KubectlCmdFileName)
 	if err != nil {
 		log.Fatalf("unable to create yaml/cmd files: %v", err)
 	}
 
 	defer func() {
 		yamlFile.Close()
-		kubectlCmdFile.Close()
+		DocCmdFile.Close()
 	}()
 	//Print the result
 	for _, t := range tokens {
@@ -53,7 +57,7 @@ func main() {
 			case "yaml":
 				yamlFile.Write([]byte(fmt.Sprintf("---\n%s", snippet.Content)))
 			case "bash":
-				kubectlCmdFile.Write([]byte(fmt.Sprintf("\n%s", snippet.Content)))
+				DocCmdFile.Write([]byte(fmt.Sprintf("\n%s", snippet.Content)))
 			default:
 				fmt.Println("Non executable snippet.")
 
@@ -63,16 +67,23 @@ func main() {
 
 	// Read kubeconfig and set KUBECONFIG environment variable accordingly
 	os.Setenv("KUBECONFIG", kubeconfigFilePath)
-	fmt.Println(os.Getenv("KUBECONFIG"))
 
 	// Apply yaml file and execute kubectl command script
 
-	cmd := exec.Command("kubectl", "apply", "-f", YamlFileName)
+	var cmd *exec.Cmd
 	var out, kubeErr bytes.Buffer
-	cmd.Stdout = &out
+	if cmdType == kubectlCmd {
+		cmd = exec.Command("kubectl", "apply", "-f", YamlFileName)
+		cmd.Stdout = &out
+		cmd.Stderr = &kubeErr
+	} else if cmdType == pxctlCmd {
+		cmd = exec.Command("kubectl", "apply", "-f", YamlFileName)
+		cmd.Stdout = &out
+		cmd.Stderr = &kubeErr
+	}
 
 	if err := cmd.Run(); err != nil {
-		log.Fatal(err)
+		log.Fatal(cmd.Stderr)
 	}
 	fmt.Println(out.String())
 
