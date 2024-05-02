@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"flag"
 	"fmt"
@@ -9,8 +10,8 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/Rohit-PX/md-file-code-gen/markdownutils"
 	"github.com/golang-commonmark/markdown"
-	"github.com/md-file-code-gen/markdownutils"
 )
 
 var ArtifactDirectory string = "artifacts"
@@ -18,7 +19,7 @@ var YamlFileName string = ArtifactDirectory + "/docTest.yaml"
 var KubectlCmdFileName string = ArtifactDirectory + "/kubectlCmd.sh"
 var kubectlCmd string = "kubectl"
 var pxctlCmd string = "pxctl"
-var cmdType string
+var cmdType, ipAddr string
 
 func main() {
 
@@ -27,6 +28,7 @@ func main() {
 	flag.StringVar(&mdFilePath, "mdfile", "", `Path to the md file`)
 	flag.StringVar(&kubeconfigFilePath, "kubeconfig", "", `Path to the kubeconfig file`)
 	flag.StringVar(&cmdType, "commandType", "", `Command type could be one of - kubectl or pxctl (pxctl needs to be run on the PX node directly)`)
+	flag.StringVar(&ipAddr, "ipaddr", "", `IP address of worker node for pxctl commands`)
 	flag.Parse()
 	if mdFilePath == "" {
 		log.Fatalln("Please, provide path to an mdfile for the readme to parse.")
@@ -77,22 +79,52 @@ func main() {
 		cmd.Stdout = &out
 		cmd.Stderr = &kubeErr
 	} else if cmdType == pxctlCmd {
-		cmd = exec.Command("kubectl", "apply", "-f", YamlFileName)
-		cmd.Stdout = &out
-		cmd.Stderr = &kubeErr
+		// open the file containing just pxctl commands
+		file, err := os.Open(KubectlCmdFileName)
+		if err != nil {
+			log.Fatalf("Error opening file:", err)
+		}
+		// Create a new Scanner to read the file.
+		scanner := bufio.NewScanner(file)
+		// Set the split function to the default ScanLines
+		scanner.Split(bufio.ScanLines)
+
+		// Loop over all lines in the file.
+		for scanner.Scan() {
+			line := scanner.Text()
+			fmt.Println(line)
+			//pxSSH := fmt.Sprintf("ssh root@%s '%s'\n", ipAddr, line) // Print each line, or process it as needed.
+			//cmd = exec.Command(pxSSH)
+			//cmd.Stdout = &out
+			//cmd.Stderr = &kubeErr
+
+			//if err := cmd.Run(); err != nil {
+			//	fmt.Println(out.String())
+			//	log.Fatal(cmd.Stderr)
+			//}
+		}
+
+		//cmd = exec.Command("bash", KubectlCmdFileName)
+		//cmd.Stdout = &out
+		//cmd.Stderr = &kubeErr
+
+		//if err := cmd.Run(); err != nil {
+		//	fmt.Println(out.String())
+		//	log.Fatal(cmd.Stderr)
+		//}
 	}
 
-	if err := cmd.Run(); err != nil {
-		log.Fatal(cmd.Stderr)
-	}
-	fmt.Println(out.String())
+	//if err := cmd.Run(); err != nil {
+	//	log.Fatal(cmd.Stderr)
+	//}
+	//fmt.Println(out.String())
 
-	cmd = exec.Command("bash", KubectlCmdFileName)
-	cmd.Stdout = &out
-	cmd.Stderr = &kubeErr
+	//cmd = exec.Command("bash", KubectlCmdFileName)
+	//cmd.Stdout = &out
+	//cmd.Stderr = &kubeErr
 
-	if err := cmd.Run(); err != nil {
-		log.Fatal(cmd.Stderr)
-	}
-	fmt.Println(out.String())
+	//if err := cmd.Run(); err != nil {
+	//	log.Fatal(cmd.Stderr)
+	//}
+	//fmt.Println(out.String())
 }
