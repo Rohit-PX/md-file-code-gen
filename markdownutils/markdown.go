@@ -8,13 +8,13 @@ import (
 	"github.com/golang-commonmark/markdown"
 )
 
-//Snippet represents the snippet we will output.
+// Snippet represents the snippet we will output.
 type Snippet struct {
 	Content string
 	Lang    string
 }
 
-//getSnippet extract only code Snippet from markdown object.
+// getSnippet extract only code Snippet from markdown object.
 func GetSnippet(tok markdown.Token) Snippet {
 	switch tok := tok.(type) {
 	case *markdown.CodeBlock:
@@ -36,7 +36,7 @@ func GetSnippet(tok markdown.Token) Snippet {
 	return Snippet{}
 }
 
-//readFromWeb call the given url and return the content of the readme.
+// readFromWeb call the given url and return the content of the readme.
 func readFromWeb(url string) ([]byte, error) {
 	resp, err := http.Get(url)
 	if err != nil {
