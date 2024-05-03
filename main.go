@@ -94,15 +94,15 @@ func main() {
 		for scanner.Scan() {
 			line := scanner.Text()
 			fmt.Println(line)
-			//pxSSH := fmt.Sprintf("ssh root@%s '%s'\n", ipAddr, line) // Print each line, or process it as needed.
-			//cmd = exec.Command(pxSSH)
-			//cmd.Stdout = &out
-			//cmd.Stderr = &kubeErr
+			pxSSH := fmt.Sprintf("ssh root@%s '%s'\n", ipAddr, line) // Print each line, or process it as needed.
+			cmd = exec.Command(pxSSH)
+			cmd.Stdout = &out
+			cmd.Stderr = &kubeErr
 
-			//if err := cmd.Run(); err != nil {
-			//	fmt.Println(out.String())
-			//	log.Fatal(cmd.Stderr)
-			//}
+			if err := cmd.Run(); err != nil {
+				fmt.Println(out.String())
+				log.Fatal(cmd.Stderr)
+			}
 		}
 
 		//cmd = exec.Command("bash", KubectlCmdFileName)
