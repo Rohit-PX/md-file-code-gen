@@ -36,7 +36,6 @@ This document will show you how to create a snapshot of a PVC backed by a Portwo
     ```
 
 2. Once you apply the above object you can check the status of the snapshots using `kubectl`:
-
     ```bash
     kubectl get -n jenkins volumesnapshot
     ```
@@ -279,5 +278,9 @@ kubectl delete ns jenkins
 ```bash
 kubectl delete ns jenkins-prod
 ``` 
+```bash
+pxctl volume list
+``` 
+
 </Comment>
 

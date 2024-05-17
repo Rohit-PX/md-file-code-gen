@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/golang-commonmark/markdown"
 	"golang.org/x/crypto/ssh"
@@ -87,46 +88,24 @@ func CreateArtifactFiles(dirName, yamlFileName, cmdFileName string) (*os.File, *
 //	              2. executes kubectl commands from command file using provided kubeconfig file
 //		for pxctl: executes pxctl commands by creating ssh connection to the provided ip addres
 func ExecuteCmdFile(execInfo *ExecutableInfo) error {
+	// Apply YAMLs
 	var cmd *exec.Cmd
 	var out, kubeErr bytes.Buffer
-	myConn := NewConnection(execInfo.IpAddr)
-	switch execInfo.CommandType {
-	case kubectlCmd:
-		log.Printf("Kubectl command type selected.")
-		cmd = exec.Command("kubectl", "apply", "-f", YamlFileName)
-		cmd.Stdout = &out
-		cmd.Stderr = &kubeErr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to execute kubectl command error: %v", cmd.Stderr)
-		}
-		fmt.Println(out.String())
-
-		err := ReadFileRunCmd(myConn, CmdFileName, false)
-		if err != nil {
-			return err
-		}
-
-	case pxctlCmd:
-		log.Printf("pxctl command type selected. Reading file: %s", CmdFileName)
-		file, err := os.Open(CmdFileName)
-		if err != nil {
-			log.Fatalf("Error opening file: %v", err)
-		}
-		defer file.Close()
-		scanner := bufio.NewScanner(file)
-
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line != "" {
-				log.Printf("pxctl command: %s", line)
-				out, err := myConn.RunSSHCmd(line)
-				if err != nil {
-					return fmt.Errorf("failed to run command: \"%s\" on: %s, err: %v", line, execInfo.IpAddr, err)
-				}
-				log.Printf("PXCTL output: %s", out)
-			}
-		}
+	cmd = exec.Command("kubectl", "apply", "-f", YamlFileName)
+	cmd.Stdout = &out
+	cmd.Stderr = &kubeErr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to execute kubectl command error: %v", cmd.Stderr)
 	}
+
+	// Read command file from artifacts
+	fmt.Println(out.String())
+	myConn := NewConnection(execInfo.IpAddr)
+	err := ReadFileRunCmd(myConn, CmdFileName, false)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -178,17 +157,9 @@ func (c *Conn) RunSSHCmd(cmd string) (string, error) {
 }
 
 func RunCmd(cmd string) (string, error) {
-	var execCmd *exec.Cmd
-	var out, kubeErr bytes.Buffer
-
-	execCmd = exec.Command(cmd)
-	execCmd.Stdout = &out
-	execCmd.Stderr = &kubeErr
-
-	if err := execCmd.Run(); err != nil {
-		return out.String(), fmt.Errorf("failed to execute cmd: %s, err: %v", cmd, err)
-	}
-	return out.String(), nil
+	execCmd := exec.Command("sh", "-c", cmd)
+	output, err := execCmd.CombinedOutput()
+	return string(output), err
 }
 
 func ReadFileRunCmd(myConn Conn, CmdFileName string, isSSH bool) error {
@@ -200,20 +171,26 @@ func ReadFileRunCmd(myConn Conn, CmdFileName string, isSSH bool) error {
 	scanner := bufio.NewScanner(file)
 
 	for scanner.Scan() {
+		var parsedCmd string
 		line := scanner.Text()
 		if line != "" {
-			if isSSH {
+			parsedCmd = strings.Split(line, " ")[0]
+			switch parsedCmd {
+			case pxctlCmd:
+				log.Printf("pxctl command found: %s", line)
 				out, err := myConn.RunSSHCmd(line)
 				if err != nil {
 					return fmt.Errorf("failed to run command: \"%s\" on: %s, err: %v", line, myConn.IpAddr, err)
 				}
 				log.Printf("PXCTL output: %s", out)
-			} else {
+
+			case kubectlCmd:
+				log.Printf("kubectl command found: %s", line)
 				out, err := RunCmd(line)
 				if err != nil {
 					return fmt.Errorf("failed to run command: \"%s\" on: %s, err: %v", line, myConn.IpAddr, err)
 				}
-				log.Printf("PXCTL output: %s", out)
+				log.Printf("KUBECTL output: %s", out)
 
 			}
 		}

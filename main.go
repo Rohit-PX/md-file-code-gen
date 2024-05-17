@@ -20,7 +20,7 @@ func main() {
 	var mdFilePath, kubeconfigFilePath string
 	flag.StringVar(&mdFilePath, "mdfile", "", `Path to the md file`)
 	flag.StringVar(&kubeconfigFilePath, "kubeconfig", "", `Path to the kubeconfig file`)
-	flag.StringVar(&cmdType, "commandType", "", `Command type could be one of - kubectl or pxctl (pxctl needs to be run on the PX node directly)`)
+	//flag.StringVar(&cmdType, "commandType", "", `Command type could be one of - kubectl or pxctl (pxctl needs to be run on the PX node directly)`)
 	flag.StringVar(&ipAddr, "ipaddr", "", `IP address of worker node for pxctl commands`)
 	flag.Parse()
 	if mdFilePath == "" {
@@ -63,6 +63,8 @@ func main() {
 
 	// Read kubeconfig and set KUBECONFIG environment variable accordingly
 	os.Setenv("KUBECONFIG", kubeconfigFilePath)
+
+	// TODO: Get IP address of a worker node
 
 	info := markdownutils.ExecutableInfo{
 		CommandType: cmdType,
