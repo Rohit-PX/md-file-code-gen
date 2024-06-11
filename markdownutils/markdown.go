@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/golang-commonmark/markdown"
@@ -17,28 +18,16 @@ const (
 	kubectlCmd        = "kubectl"
 	pxctlCmd          = "pxctl"
 	ArtifactDirectory = "artifacts"
-	YamlFileName      = ArtifactDirectory + "/docTest.yaml"
-	CmdFileName       = ArtifactDirectory + "/commands.sh"
+	YamlFileName      = "docTest.yaml"
+	CmdFileName       = "commands.sh"
 	NodeUser          = "root"
 	NodePassword      = "Password1"
 )
 
-// Snippet represents the snippet we will output.
-type Snippet struct {
-	Content string
-	Lang    string
-}
+type DocValResultType string
 
-// ExecutableInfo contains information about commands and where to execute them
-type ExecutableInfo struct {
-	CommandType string `json:"commandtype"`
-	IpAddr      string `json:"ipaddr"`
-}
-
-type Conn struct {
-	Session ssh.Session
-	ExecutableInfo
-}
+var DocValPass DocValResultType = "Pass"
+var DocValFail DocValResultType = "Fail"
 
 // getSnippet extract only code Snippet from markdown object.
 func GetSnippet(tok markdown.Token) Snippet {
@@ -62,19 +51,17 @@ func GetSnippet(tok markdown.Token) Snippet {
 	return Snippet{}
 }
 
-// CreateArtifactFiles creates directories, yaml and sh files required for testing the doc
-func CreateArtifactFiles(dirName, yamlFileName, cmdFileName string) (*os.File, *os.File, error) {
-	err := os.MkdirAll("artifacts", os.ModePerm)
+// CreateArtifactFiles creates yaml and sh files required for testing the doc
+func CreateArtifactFiles(info *ExecutableInfo, fileName string) (*os.File, *os.File, error) {
+	currYamlFile := info.ArtifactPath + "/" + fileName + "-" + YamlFileName
+	//log.Printf("creating yaml file: %s", currYamlFile)
+	yamlFile, err := os.Create(currYamlFile)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	yamlFile, err := os.Create(yamlFileName)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	cmdFile, err := os.Create(cmdFileName)
+	currCmdFile := info.ArtifactPath + "/" + fileName + "-" + CmdFileName
+	cmdFile, err := os.Create(currCmdFile)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -85,37 +72,49 @@ func CreateArtifactFiles(dirName, yamlFileName, cmdFileName string) (*os.File, *
 // ExecuteCmdFile
 //
 //		for kubectl: 1. applies yaml file and
-//	              2. executes kubectl commands from command file using provided kubeconfig file
+//	                 2. executes kubectl commands from command file using provided kubeconfig file
 //		for pxctl: executes pxctl commands by creating ssh connection to the provided ip addres
-func ExecuteCmdFile(execInfo *ExecutableInfo) error {
+func ExecuteCmdFile(execInfo *ExecutableInfo, report *Report) error {
 	// Apply YAMLs
 	var cmd *exec.Cmd
 	var out, kubeErr bytes.Buffer
-	cmd = exec.Command("kubectl", "apply", "-f", YamlFileName)
-	cmd.Stdout = &out
-	cmd.Stderr = &kubeErr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to execute kubectl command error: %v", cmd.Stderr)
+
+	for _, execYaml := range execInfo.ArtifactYamls {
+		log.Printf("executing yaml: %s", execYaml)
+		res := report.NewResult(execYaml, kubectlCmd)
+		cmd = exec.Command("kubectl", "apply", "-f", execYaml)
+		cmd.Stdout = &out
+		cmd.Stderr = &kubeErr
+		err := cmd.Run()
+		if err != nil {
+			res.Error = fmt.Sprintf("failed to apply yaml %s. error: %v", execYaml, cmd.Stderr)
+			res.Status = DocValFail
+		} else {
+			res.Error = "No Errors found. Doc is valid"
+			res.Status = DocValPass
+		}
+		report.AddResult(*res)
 	}
 
-	// Read command file from artifacts
-	fmt.Println(out.String())
-	myConn := NewConnection(execInfo.IpAddr)
-	err := ReadFileRunCmd(myConn, CmdFileName, false)
-	if err != nil {
-		return err
+	for _, execDoc := range execInfo.DocCmdFiles {
+		log.Printf("executing cmd file: %s", execDoc)
+		// Read command file from artifacts
+		err := ReadFileRunCmd(execInfo.IpAddr, execDoc, false, report)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func ReadFile(fileName string) {
-	data, err := os.ReadFile(fileName)
-	if err != nil {
-		log.Panicf("failed reading data from file: %s", err)
-	}
-	fmt.Println(data)
-}
+//func ReadFile(fileName string) {
+//	data, err := os.ReadFile(fileName)
+//	if err != nil {
+//		log.Panicf("failed reading data from file: %s", err)
+//	}
+//	//fmt.Println(data)
+//}
 
 func NewConnection(ip string) Conn {
 	sess, err := GetSSHSession(ip)
@@ -162,7 +161,7 @@ func RunCmd(cmd string) (string, error) {
 	return string(output), err
 }
 
-func ReadFileRunCmd(myConn Conn, CmdFileName string, isSSH bool) error {
+func ReadFileRunCmd(ip string, CmdFileName string, isSSH bool, report *Report) error {
 	file, err := os.Open(CmdFileName)
 	if err != nil {
 		log.Fatalf("Error opening file: %v", err)
@@ -174,28 +173,151 @@ func ReadFileRunCmd(myConn Conn, CmdFileName string, isSSH bool) error {
 		var parsedCmd string
 		line := scanner.Text()
 		if line != "" {
+			res := report.NewResult(CmdFileName, line)
 			parsedCmd = strings.Split(line, " ")[0]
 			switch parsedCmd {
 			case pxctlCmd:
 				log.Printf("pxctl command found: %s", line)
+				myConn := NewConnection(ip)
 				out, err := myConn.RunSSHCmd(line)
 				if err != nil {
-					return fmt.Errorf("failed to run command: \"%s\" on: %s, err: %v", line, myConn.IpAddr, err)
+					res.Error = fmt.Sprintf("failed to run command: '%s' on: %s, err: %v", line, myConn.IpAddr, err)
+					res.Status = DocValFail
+				} else {
+					res.Error = "No Errors found. Doc is valid"
+					res.Status = DocValPass
 				}
 				log.Printf("PXCTL output: %s", out)
+				report.AddResult(*res)
 
 			case kubectlCmd:
 				log.Printf("kubectl command found: %s", line)
 				out, err := RunCmd(line)
 				if err != nil {
-					return fmt.Errorf("failed to run command: \"%s\" on: %s, err: %v", line, myConn.IpAddr, err)
+					res.Error = fmt.Sprintf("failed to run command: '%s' on: %s, err: %v:%v", line, ip, out, err)
+					res.Status = DocValFail
+				} else {
+					res.Error = "No Errors found. Doc is valid"
+					res.Status = DocValPass
 				}
-				log.Printf("KUBECTL output: %s", out)
+				//log.Printf("KUBECTL output: %s", out)
+				report.AddResult(*res)
 
 			}
 		}
 	}
 	return nil
+}
+
+func IsFileOrDir(path string) (MdPath, error) {
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("the path %s does not exist. error: %v", path, err)
+		} else {
+			return "", fmt.Errorf("error stating the path %s: %v", path, err)
+		}
+	}
+	if fileInfo.IsDir() {
+		return MdDirPath, nil
+	}
+	return MdFilePath, nil
+}
+
+func ReadMdFileAndParse(mdFilePath string, info *ExecutableInfo) error {
+	log.Printf("RK=> Parsing File: %s", mdFilePath)
+	fileName, err := getFileNameFromPath(mdFilePath)
+	if err != nil {
+		return err
+	}
+
+	//log.Printf("Creating artifact file %s in path: %s", fileName, info.ArtifactPath)
+	yamlFile, docCmdFile, err := CreateArtifactFiles(info, fileName)
+	if err != nil {
+		return fmt.Errorf("unable to create yaml/cmd files: %v", err)
+	}
+
+	body, err := os.ReadFile(mdFilePath)
+	if err != nil {
+		return fmt.Errorf("unable to read file: %v", err)
+	}
+	md := markdown.New(markdown.XHTMLOutput(true), markdown.Nofollow(true))
+	tokens := md.Parse(body)
+
+	defer func() {
+		yamlFile.Close()
+		docCmdFile.Close()
+	}()
+
+	for _, t := range tokens {
+		snippet := GetSnippet(t)
+
+		if snippet.Content != "" {
+			switch snippet.Lang {
+			case "yaml":
+				yamlFile.Write([]byte(fmt.Sprintf("---\n%s", snippet.Content)))
+			case "bash":
+				docCmdFile.Write([]byte(fmt.Sprintf("\n%s", snippet.Content)))
+			default:
+				log.Println("Non executable snippet.")
+			}
+		}
+	}
+	// TODO: Get IP address of a worker node
+	info.ArtifactYamls = append(info.ArtifactYamls, yamlFile.Name())
+	info.DocCmdFiles = append(info.DocCmdFiles, docCmdFile.Name())
+
+	return nil
+}
+
+func ReadMdDirectoryAndParse(mdFileDirPath string, info *ExecutableInfo) error {
+	log.Printf("RK=> Parsing Dir: %s", mdFileDirPath)
+	dir, err := os.Open(mdFileDirPath)
+	if err != nil {
+		log.Fatalf("Failed to open directory: %v", err)
+	}
+	defer dir.Close()
+
+	// Read the directory contents
+	files, err := dir.Readdir(-1)
+	if err != nil {
+		log.Fatalf("Failed to read directory: %v", err)
+	}
+
+	// Iterate over the directory contents
+	for _, file := range files {
+		if !file.IsDir() {
+			if filepath.Ext(file.Name()) == ".md" {
+				filePath := mdFileDirPath + "/" + file.Name()
+
+				// Read the file contents
+				err := ReadMdFileAndParse(filePath, info)
+				if err != nil {
+					log.Fatalf("md file parsing failed for specified file: %s. error: %v", filePath, err)
+				}
+			}
+		} else if !strings.Contains(mdFileDirPath+"/"+file.Name(), "artifacts") {
+			// Recursively call parent function
+			dirPath := mdFileDirPath + "/" + file.Name()
+			err = ReadMdDirectoryAndParse(dirPath, info)
+			if err != nil {
+				return fmt.Errorf("failed to parse directory: %v. error: %v", dirPath, err)
+			}
+		}
+	}
+	return nil
+}
+
+func getFileNameFromPath(filePath string) (string, error) {
+	baseName := filepath.Base(filePath)
+	extension := filepath.Ext(baseName)
+	if extension != ".md" {
+		return "", fmt.Errorf("found a file that is not a .md file: %s base: %s extension: %s", filePath, baseName, extension)
+	}
+
+	// Remove the extension from the base name
+	fileName := strings.TrimSuffix(baseName, extension)
+	return fileName, nil
 }
 
 //// readFromWeb call the given url and return the content of the readme.
